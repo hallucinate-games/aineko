@@ -39,6 +39,12 @@ def add_file_to_collection(collection, file_path: str):
     maybe_plural_chunks = 'chunk' if chunks_added == 1 else 'chunks'
     print(f"Added {chunks_added} {maybe_plural_chunks} to collection from file {file_path}")
 
+def add_dir_to_collection(collection, dir: str):
+    for root, _, files in os.walk(dir):
+        for file in files:
+            file_path = os.path.join(root, file)
+            add_file_to_collection(collection, file_path)
+
 def _sentence_chunk_file(file_path: str) -> Generator[str, None, None]:
     """ Breaks a file into approximately sentence sized chunks. """
     with open(file_path, 'r') as f:
@@ -120,7 +126,7 @@ def _generate_overlapping_chunks(
             current_chunk_idx += 1
             current_chunk = ' '.join(overlap_chunk_buffer)
             current_chunk_size = len(overlap_chunk_buffer)
-    if current_chunk_size != len(overlap_chunk_buffer):
+    if current_chunk.strip() != '' and (current_chunk_size != len(overlap_chunk_buffer) or current_chunk_idx == 0):
         yield DocumentChunk(
             text=current_chunk,
             file_path=file_path,
