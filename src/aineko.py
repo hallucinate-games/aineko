@@ -3,20 +3,18 @@ import os
 import time
 from typing import Generator
 
+import chromadb
 from chromadb.api.types import D, EmbeddingFunction, Embeddings
 from chromadb.utils import embedding_functions
 from nltk import download
 from nltk.tokenize import sent_tokenize
 
-# Used by `_sentence_chunk_file` for sentence tokenization
-try:
-    download('punkt')
-except Exception as exc:
-    print(
-        "While you do not need an internet connection to run aineko, "
-        "you do need to be connected to the internet the first time you run "
-        "it to download the sentence tokenization system.")
-    raise exc
+_punkt_downloaded = False
+_chroma_client = None
+_collection = None
+
+chroma_client = chromadb.Client()
+
 
 class AinekoEmbeddingFunction(EmbeddingFunction):
     def __call__(self, input: D) -> Embeddings:
@@ -25,12 +23,36 @@ class AinekoEmbeddingFunction(EmbeddingFunction):
         embeddings = embedding_functions.DefaultEmbeddingFunction()(input)
         return embeddings
 
-def add_file_to_collection(collection, file_path: str):
+
+def create_collection(name: str=None, persistent: bool=False):
+    global _chroma_client
+    global _collection
+    name = name or 'aineko-demo'
+    if persistent:
+        _chroma_client = chromadb.PersistentClient(path="../demo-db")
+    else:
+        _chroma_client = chromadb.Client()
+    _collection = chroma_client.get_or_create_collection(name=name, embedding_function=AinekoEmbeddingFunction())
+
+    if persistent:
+        _chroma_client.delete_collection(name)
+        _collection = chroma_client.get_or_create_collection(name="aineko-demo", embedding_function=AinekoEmbeddingFunction())
+    return _collection
+
+
+def get_collection():
+    global _collection
+    if not _collection:
+        return create_collection()
+    return _collection
+    
+
+def add_file_to_collection(file_path: str):
     """ Add chunks of a file to a chromadb collection """
     document_chunks = _generate_overlapping_chunks(file_path)
     chunks_added = 0
     for chunk in document_chunks:
-        collection.add(
+        _collection.add(
             ids=[f"chunk{chunk.chunk_idx}:{file_path}"],
             documents=[chunk.text],
             metadatas=[chunk.generate_metadata_object()]
@@ -39,14 +61,31 @@ def add_file_to_collection(collection, file_path: str):
     maybe_plural_chunks = 'chunk' if chunks_added == 1 else 'chunks'
     print(f"Added {chunks_added} {maybe_plural_chunks} to collection from file {file_path}")
 
-def add_dir_to_collection(collection, dir: str):
+
+def add_dir_to_collection(dir: str):
+    files_added = []
     for root, _, files in os.walk(dir):
         for file in files:
             file_path = os.path.join(root, file)
-            add_file_to_collection(collection, file_path)
+            add_file_to_collection(file_path)
+            files_added.append(file_path)
+    return files_added
+
 
 def _sentence_chunk_file(file_path: str) -> Generator[str, None, None]:
     """ Breaks a file into approximately sentence sized chunks. """
+    global _punkt_downloaded
+    if not _punkt_downloaded:
+        # Used by `_sentence_chunk_file` for sentence tokenization
+        try:
+            download('punkt')
+            _punkt_downloaded = True
+        except Exception as exc:
+            print(
+                "While you do not need an internet connection to run aineko, "
+                "you do need to be connected to the internet the first time you run "
+                "it to download the sentence tokenization system.")
+            raise exc
     with open(file_path, 'r') as f:
         raw_text = f.read()
         
@@ -62,6 +101,7 @@ def _sentence_chunk_file(file_path: str) -> Generator[str, None, None]:
             current_chunk = sentence
     yield current_chunk
 
+
 def _get_file_times(file_path):
     # Get the creation time
     creation_time = os.path.getctime(file_path)
@@ -73,6 +113,7 @@ def _get_file_times(file_path):
     modification_time = time.ctime(modification_time)
 
     return creation_time, modification_time
+
 
 @dataclass
 class DocumentChunk:
@@ -94,6 +135,7 @@ class DocumentChunk:
             "file_created_at": self.file_created_at,
             "file_last_updated_at": self.file_last_updated_at
         }
+
 
 def _generate_overlapping_chunks(
         file_path: str,

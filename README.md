@@ -15,7 +15,28 @@ $ .venv/Scripts/activate
 # Install requirments
 (.venv) $ pip install -r requirements.txt
 
-# Run
-(.venv) $ python src/main.py
+# Run as a server
+(.venv) $ python src/main.py --server
 
 ```
+
+## Endpoints
+
+### `POST /add-dir`
+This endpoint allows you to specify a directory to be recursively ingested into `aineko`'s embedding database
+- Expects: JSON in body of the format:
+  - 'dir_to_add': a string of the directory you'd like to have recursively ingested for indexing by `aineko`
+- Returns: JSON in the format:
+  - 'files_added': List of strings of paths of files ingested by `aineko`
+
+### `POST /query`
+This endpoint allows you to send a query to be matched by nearest embeddings.
+- Expects: JSON in body of the format:
+  - `query`: string query
+- Returns: JSON (format TBD, right now we're just returning raw chromadb results as a hack)
+
+### `GET file/*`
+Downloads the file specified at `*`. Must be a URL encoded absolute path.
+
+### `GET /`
+nyaa!

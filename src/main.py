@@ -2,18 +2,9 @@ import argparse
 from pprint import pprint
 import sys
 
-import chromadb
+from aineko import add_dir_to_collection, add_file_to_collection, create_collection, get_collection
+from server import app
 
-from aineko import add_dir_to_collection, add_file_to_collection, AinekoEmbeddingFunction 
-
-# Use this for persistent client
-#chroma_client = chromadb.PersistentClient(path="../demo-db")
-chroma_client = chromadb.Client()
-
-collection = chroma_client.get_or_create_collection(name="aineko-demo", embedding_function=AinekoEmbeddingFunction())
-# Uncomment these for persistent client
-#chroma_client.delete_collection("aineko-demo")
-#collection = chroma_client.get_or_create_collection(name="aineko-demo", embedding_function=AinekoEmbeddingFunction())
 
 def main():
     parser = argparse.ArgumentParser(description="Smart embedding vector storage and retrieval")
@@ -31,13 +22,14 @@ def main():
     server_mode = getattr(args, 'server', False)
 
     if not (file_to_add or dir_to_add or query or server_mode):
-        parser.print_usage()
+        parser.print_help()
         sys.exit(1)
     
+    collection = create_collection()
     if file_to_add:
-        add_file_to_collection(collection=collection, file_path=file_to_add)
+        add_file_to_collection(file_path=file_to_add)
     if dir_to_add:
-        add_dir_to_collection(collection=collection, dir=dir_to_add)
+        add_dir_to_collection(dir=dir_to_add)
     if query:
         query_results = collection.query(
                 query_texts=[query],
@@ -45,7 +37,7 @@ def main():
         )
         pprint(query_results)
     if server_mode:
-        raise NotImplementedError("Server mode is not yet implemented")
+        app.run(debug=True)
 
 if __name__ == "__main__":
     main()
