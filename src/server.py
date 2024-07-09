@@ -39,7 +39,7 @@ def query():
     if not query_text:
         raise JsonError("Missing `query` key")
     query_results = fetch_query_results(query_text)
-    return query_results
+    return { "query_results": query_results }
 
 @app.route('/file/<path:file_path>', methods=['GET'])
 def get_file(file_path):

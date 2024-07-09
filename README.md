@@ -33,7 +33,19 @@ This endpoint allows you to specify a directory to be recursively ingested into 
 This endpoint allows you to send a query to be matched by nearest embeddings.
 - Expects: JSON in body of the format:
   - `query`: string query
-- Returns: JSON (format TBD, right now we're just returning raw chromadb results as a hack)
+- Returns: JSON in the format:
+  - `query_results`: a list of:
+    - `result_type`: `"text"` or `"image"`
+    - `file_created_at`: string
+    - `file_last_updated_at`: string
+    - `file_download_uri`: string (send a GET here to download full file contents)
+    - `file_path`: string (path to file on disk)
+    - For `text` results:
+        - `begin_chunk_idx`: int
+        - `end_chunk_idx`: int
+        - `text`: string of result chunk
+    - For `image` results:
+        - Unimplemented.
 
 ### `GET file/*`
 Downloads the file specified at `*`. Must be a URL encoded absolute path.
