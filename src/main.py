@@ -2,7 +2,7 @@ import argparse
 from pprint import pprint
 import sys
 
-from aineko import add_dir_to_collection, add_file_to_collection, create_collection, get_collection
+from aineko import add_dir_to_collection, add_file_to_collection, create_collection, fetch_query_results 
 from server import app
 
 
@@ -25,16 +25,13 @@ def main():
         parser.print_help()
         sys.exit(1)
     
-    collection = create_collection()
+    create_collection()
     if file_to_add:
         add_file_to_collection(file_path=file_to_add)
     if dir_to_add:
         add_dir_to_collection(dir=dir_to_add)
     if query:
-        query_results = collection.query(
-                query_texts=[query],
-                n_results=3
-        )
+        query_results = fetch_query_results(query)
         pprint(query_results)
     if server_mode:
         app.run(debug=True)

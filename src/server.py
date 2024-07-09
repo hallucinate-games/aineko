@@ -1,10 +1,10 @@
 import os
-import urllib.parse
 
 from flask import Flask, abort, send_from_directory, request, redirect
 from flask_json import FlaskJSON, JsonError, as_json
 
-from aineko import add_dir_to_collection, get_collection
+from aineko import add_dir_to_collection, fetch_query_results
+from util import get_file_download_path
 
 app = Flask(__name__)
 json = FlaskJSON(app)
@@ -18,8 +18,7 @@ def help():
     cwd = os.getcwd()
     relative_path = "../README.md"
     full_path = os.path.join(cwd, relative_path)
-    escaped_path = urllib.parse.quote(full_path)
-    return redirect(f'/file/{escaped_path}')
+    return redirect(get_file_download_path(full_path))
 
 @app.route('/add-dir', methods=['POST'])
 @as_json
@@ -36,10 +35,10 @@ def add_dir():
 @as_json
 def query():
     data = request.get_json(force=True)
-    query = data.get('query', None)
-    if not query:
+    query_text = data.get('query', None)
+    if not query_text:
         raise JsonError("Missing `query` key")
-    query_results = get_collection().query(query_texts=[query])
+    query_results = fetch_query_results(query_text)
     return query_results
 
 @app.route('/file/<path:file_path>', methods=['GET'])

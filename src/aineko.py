@@ -1,13 +1,17 @@
+import dataclasses
 from dataclasses import dataclass
+from enum import StrEnum
 import os
 import time
-from typing import Generator
+from typing import Generator, List, Literal, Set
 
 import chromadb
 from chromadb.api.types import D, EmbeddingFunction, Embeddings
 from chromadb.utils import embedding_functions
 from nltk import download
 from nltk.tokenize import sent_tokenize
+
+from util import AbstractDataClass, get_file_download_path
 
 _punkt_downloaded = False
 _chroma_client = None
@@ -119,9 +123,9 @@ def _get_file_times(file_path):
 class DocumentChunk:
     text: str
     file_path: str
-    begin_sentence_idx: int
-    end_sentence_idx: int
     chunk_idx: int
+    begin_overlap_length: int
+    end_overlap_length: int
     file_created_at: str
     file_last_updated_at: str
 
@@ -133,7 +137,9 @@ class DocumentChunk:
             "file_path": self.file_path,
             "chunk_index": self.chunk_idx,
             "file_created_at": self.file_created_at,
-            "file_last_updated_at": self.file_last_updated_at
+            "file_last_updated_at": self.file_last_updated_at,
+            "begin_overlap_length": self.begin_overlap_length,
+            "end_overlap_length": self.end_overlap_length
         }
 
 
@@ -145,36 +151,127 @@ def _generate_overlapping_chunks(
     """ Generates overlapping chunks from file packaged with metadata. """
     sentence_chunks = _sentence_chunk_file(file_path)
     file_created_at, file_last_updated_at = _get_file_times(file_path)
-    current_chunk_size = 0
     current_chunk_idx = 0
-    current_chunk = ''
-    overlap_chunk_buffer = []
-    for sentence_number, sentence in enumerate(sentence_chunks):
-        overlap_chunk_buffer.append(sentence)
-        if len(overlap_chunk_buffer) > overlap:
-            overlap_chunk_buffer.pop(0)
-        current_chunk += ' ' + sentence
-        current_chunk_size += 1
-        if current_chunk_size >= chunk_size:
+    chunk_buffer = []
+    for sentence in sentence_chunks:
+        chunk_buffer.append(sentence)
+        if len(chunk_buffer) >= chunk_size:
             yield DocumentChunk(
-                text=current_chunk,
+                text=' '.join(chunk_buffer),
                 file_path=file_path,
-                begin_sentence_idx=sentence_number - current_chunk_size,
-                end_sentence_idx=sentence_number,
                 chunk_idx=current_chunk_idx,
+                begin_overlap_length=sum([len(_) for _ in chunk_buffer[:overlap]]) + (len(chunk_buffer[:overlap]) - 1),
+                end_overlap_length=sum([len(_) for _ in chunk_buffer[-overlap:]]) + (len(chunk_buffer[-overlap:])- 1),
                 file_created_at=file_created_at,
                 file_last_updated_at=file_last_updated_at,
             )
             current_chunk_idx += 1
-            current_chunk = ' '.join(overlap_chunk_buffer)
-            current_chunk_size = len(overlap_chunk_buffer)
-    if current_chunk.strip() != '' and (current_chunk_size != len(overlap_chunk_buffer) or current_chunk_idx == 0):
+            chunk_buffer = chunk_buffer[-overlap:]
+    if (len(chunk_buffer) and chunk_buffer[0] != '') and (len(chunk_buffer) != overlap or current_chunk_idx == 0):
         yield DocumentChunk(
-            text=current_chunk,
+            text=' '.join(chunk_buffer),
             file_path=file_path,
-            begin_sentence_idx=sentence_number - current_chunk_size,
-            end_sentence_idx=sentence_number,
             chunk_idx=current_chunk_idx,
+            begin_overlap_length=sum([len(_) for _ in chunk_buffer[:overlap]]) + (len(chunk_buffer[:overlap]) - 1),
+            end_overlap_length=sum([len(_) for _ in chunk_buffer[-overlap:]]) + (len(chunk_buffer[-overlap:])- 1),
             file_created_at=file_created_at,
             file_last_updated_at=file_last_updated_at,
         )
+
+
+class QueryResultType(StrEnum):
+    TEXT = 'text'
+    IMAGE = 'image'
+
+@dataclass
+class QueryResult(AbstractDataClass):
+    result_type: QueryResultType
+
+@dataclass
+class TextResult(QueryResult):
+    result_type: Literal[QueryResultType.TEXT]
+    text: str
+    begin_chunk_idx: int
+    end_chunk_idx: int
+    file_download_uri: str
+    file_path: str
+    file_created_at: str
+    file_last_updated_at: str
+
+@dataclass(frozen=True)
+class SeenChunk:
+    file_path: str
+    chunk_idx: int
+
+def _collate_raw_results(raw_query_results, max_results: int, max_allowed_gap: int = 1) -> List[QueryResult]:
+    query_results: List[QueryResult] = []
+    seen_chunks: Set[SeenChunk] = set()
+    for document, metadata in zip(raw_query_results['documents'][0], raw_query_results['metadatas'][0]):
+        chunk_idx = metadata['chunk_index']
+        file_path = metadata['file_path']
+        seen_chunk = SeenChunk(file_path, chunk_idx)
+        if seen_chunk in seen_chunks:
+            # This can happen when a chunk gets loaded in when it occupied a gap between
+            # other chunks
+            continue
+        seen_chunks.add(seen_chunk)
+        # search for existing results to collate to
+        for query_result_idx, query_result in enumerate(query_results):
+            if query_result.file_path != file_path:
+                continue
+            min_chunk_idx = max(query_result.begin_chunk_idx - max_allowed_gap, 0)
+            max_chunk_idx = query_result.end_chunk_idx + max_allowed_gap
+            if min_chunk_idx > chunk_idx or max_chunk_idx < chunk_idx:
+                # Too far from chunk. Continue search.
+                continue
+            # We have a matching chunk to collate to.
+            if query_result.result_type == QueryResultType.IMAGE:
+                raise NotImplementedError("No image support yet")
+            elif query_result.result_type == QueryResultType.TEXT:
+                if chunk_idx == query_result.min_chunk_idx - 1:
+                    # We need to prepend found chunk
+                    new_query_result = dataclasses.replace(
+                        query_result,
+                        text=' '.join([document[-metadata['end_overlap_length']:], query_result.text]),
+                        begin_chunk_idx=chunk_idx,
+                        end_chunk_idx=query_result.end_chunk_idx,
+                    )
+                    query_results[query_result_idx] = new_query_result
+                    break
+                elif chunk_idx == query_result.max_chunk_idx + 1:
+                    # We need to append found chunk
+                    new_query_result = dataclasses.replace(
+                        query_result,
+                        text=' '.join([query_result, document[:metadata['begin_overlap_length']]]),
+                        begin_chunk_idx=query_result.begin_chunk_idx,
+                        end_chunk_idx=chunk_idx,
+                    )
+                    query_results[query_result_idx] = new_query_result
+                    break
+                elif max_allowed_gap > 0:
+                    raise NotImplementedError('Have not implemented gap filling!')
+            else:
+                raise ValueError("Unexpected query result type")
+            raise NotImplementedError("NEED TO IMPLEMENT COLLATION HERE")
+            break
+        else:
+            # No matching chunks to collate to. Add directly to query results.
+            query_results.append(TextResult(
+                result_type=QueryResultType.TEXT,
+                text=document,
+                begin_chunk_idx=chunk_idx,
+                end_chunk_idx=chunk_idx,
+                file_download_uri=get_file_download_path(file_path),
+                file_path=file_path,
+                file_created_at=metadata['file_created_at'],
+                file_last_updated_at=metadata['file_last_updated_at']
+            ))
+    # While this looks inefficient (why not abort early when we've reached `max_results` results?), we do this
+    # so that we might get some straggling collations to enhance the first `max_results` results with further
+    # context.
+    return query_results[:max_results]
+
+def fetch_query_results(query_text: str, max_results: int = 5, max_allowed_collation_gap: int = 0) -> List[QueryResult]:
+    raw_query_results = get_collection().query(query_texts=[query_text], n_results=max_results*2)
+    query_results = _collate_raw_results(raw_query_results, max_results, max_allowed_gap=max_allowed_collation_gap)
+    return query_results
