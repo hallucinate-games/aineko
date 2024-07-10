@@ -90,7 +90,7 @@ def _sentence_chunk_file(file_path: str) -> Generator[str, None, None]:
                 "you do need to be connected to the internet the first time you run "
                 "it to download the sentence tokenization system.")
             raise exc
-    with open(file_path, 'r') as f:
+    with open(file_path, 'r', encoding='utf-8') as f:
         raw_text = f.read()
         
     # Tokenize the text into sentences and words
