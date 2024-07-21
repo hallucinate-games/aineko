@@ -1,13 +1,15 @@
 import dataclasses
 from dataclasses import dataclass
 from enum import StrEnum
+from itertools import chain
 import os
 import time
-from typing import Generator, List, Literal, Set
+from typing import Generator, List, Literal, Optional, Set
 
 import chromadb
 from chromadb.api.types import D, EmbeddingFunction, Embeddings
 from chromadb.utils import embedding_functions
+import math
 from nltk import download
 from nltk.tokenize import sent_tokenize
 
@@ -77,6 +79,13 @@ def add_dir_to_collection(dir: str):
 
 
 def _sentence_chunk_file(file_path: str) -> Generator[str, None, None]:
+    with open(file_path, 'r', encoding='utf-8') as f:
+        raw_text = f.read()
+
+    return _sentence_chunk_text(raw_text=raw_text)
+        
+
+def _sentence_chunk_text(raw_text: str) -> Generator[str, None, None]:
     """ Breaks a file into approximately sentence sized chunks. """
     global _punkt_downloaded
     if not _punkt_downloaded:
@@ -90,9 +99,7 @@ def _sentence_chunk_file(file_path: str) -> Generator[str, None, None]:
                 "you do need to be connected to the internet the first time you run "
                 "it to download the sentence tokenization system.")
             raise exc
-    with open(file_path, 'r', encoding='utf-8') as f:
-        raw_text = f.read()
-        
+
     # Tokenize the text into sentences and words
     sentences = sent_tokenize(raw_text)
     
@@ -275,3 +282,83 @@ def fetch_query_results(query_text: str, max_results: int = 5, max_allowed_colla
     raw_query_results = get_collection().query(query_texts=[query_text], n_results=max_results*2)
     query_results = _collate_raw_results(raw_query_results, max_results, max_allowed_gap=max_allowed_collation_gap)
     return query_results
+
+
+@dataclass
+class TextReference:
+    file_path: str
+    begin_chunk_idx: int
+    end_chunk_idx: int
+
+
+@dataclass
+class CitedSentence:
+    sentence: str
+    text_reference_idx: Optional[int]
+    distance: float
+
+
+Vector = List[float]
+ReferenceVectors = List[Vector]
+
+
+def _vectorize_text_references(text_references: List[TextReference]) -> List[ReferenceVectors]:
+    reference_ids: List[List[str]] = [
+        [
+            f"chunk{chunk_idx}:{reference.file_path}" 
+            for chunk_idx in range(
+                reference.begin_chunk_idx, 
+                reference.end_chunk_idx + 1
+            )
+        ] 
+        for reference in text_references
+    ]
+    flattened_ids = [_ for _ in chain(*reference_ids)]
+    results = get_collection().get(flattened_ids, include=["embeddings"])
+    vectors = results['embeddings']
+    unflattened_vectors = []
+    for chunk_ids in reference_ids:
+        reference_vectors = []
+        for _ in chunk_ids:
+            reference_vectors.append(vectors.pop(0))
+        unflattened_vectors.append(reference_vectors)
+    return unflattened_vectors
+
+
+def _euclidean_distance(v1: Vector, v2: Vector) -> float:
+    return math.sqrt(sum((((a-b) ** 2) for a, b in zip(v1, v2))))
+
+def _find_nearest_reference(
+        rag_sentence: str, 
+        rag_sentence_vector: Vector,
+        reference_vectors: List[ReferenceVectors],
+    ) -> CitedSentence:
+    shortest_distance = math.inf
+    reference_index = None
+    closest_distances = [
+        max([_euclidean_distance(rag_sentence_vector, chunk_vector) for chunk_vector in chunk_vectors])
+        for chunk_vectors in reference_vectors
+    ]
+    for ref_index, distance in enumerate(closest_distances):
+        if distance < shortest_distance:
+            shortest_distance = distance
+            reference_index = ref_index
+    return CitedSentence(
+        sentence=rag_sentence,
+        text_reference_idx=reference_index,
+        distance=shortest_distance
+    )
+
+
+def add_citations_to_rag_response(rag_response: str, text_references: List[TextReference]) -> List[CitedSentence]:
+    chunked_rag_response = list(filter(lambda s: s != '', _sentence_chunk_text(rag_response)))
+    vectorized_response_sentences = AinekoEmbeddingFunction()(chunked_rag_response)
+    reference_vectors = _vectorize_text_references(text_references)
+    return [
+        _find_nearest_reference(
+            rag_sentence=rag_sentence,
+            rag_sentence_vector=rag_sentence_vector,
+            reference_vectors=reference_vectors
+        )
+        for rag_sentence, rag_sentence_vector in zip(chunked_rag_response, vectorized_response_sentences)
+    ]

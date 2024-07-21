@@ -41,11 +41,26 @@ This endpoint allows you to send a query to be matched by nearest embeddings.
     - `file_download_uri`: string (send a GET here to download full file contents)
     - `file_path`: string (path to file on disk)
     - For `text` results:
-        - `begin_chunk_idx`: int
-        - `end_chunk_idx`: int
+        - `begin_chunk_idx`: int (inclusive)
+        - `end_chunk_idx`: int (inclusive)
         - `text`: string of result chunk
     - For `image` results:
         - Unimplemented.
+
+### `POST /inject_citations`
+This endpoint receives references to text from the indexed corpus as well as the RAG response text. It splits the response text into approximate sentence chunks. For each chunk, it returns the index of text reference which is semantically closest to the sentence as well as the distance of the reference.
+- Excpects: JSON in body of the format:
+  - `rag_response_text`: string
+  - `text_references`: a list of:
+    - `file_path`: string
+    - `begin_chunk_idx`: int (inclusive)
+    - `end_chunk_idx`: int (inclusive)
+- Returns: JSON in the format:
+  - `cited_sentences`: a list of:
+    - `sentence`: str of the original sentence
+    - `text_reference_idx`: zero-indexed reference to the text references passed above which is semantically closest to the sentence
+    - `distance`: float representing the semantic distance
+Note that the sentence chunking is lossy in that the white space between sentences is lost, so full reconstruction of response is not recommended using the results of this endpoint.
 
 ### `GET file/*`
 Downloads the file specified at `*`. Must be a URL encoded absolute path.
