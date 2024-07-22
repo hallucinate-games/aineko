@@ -313,9 +313,14 @@ def _vectorize_text_references(text_references: List[TextReference]) -> List[Ref
         ] 
         for reference in text_references
     ]
-    flattened_ids = [_ for _ in chain(*reference_ids)]
-    results = get_collection().get(flattened_ids, include=["embeddings"])
-    vectors = results['embeddings']
+    collection = get_collection()
+    # This is the slow and stupid N+1 way to do this.
+    # If this bottle necks, we could batch fetch these and then
+    # re-match the results by reading the `['ids']` entry to match.
+    vectors = [
+        collection.get([reference_id], include=["embeddings"])['embeddings'][0]
+        for reference_id in chain(*reference_ids)
+    ]
     unflattened_vectors = []
     for chunk_ids in reference_ids:
         reference_vectors = []
