@@ -35,6 +35,7 @@ This endpoint allows you to send a query to be matched by nearest embeddings.
   - `query`: string query
 - Returns: JSON in the format:
   - `query_results`: a list of:
+    - `distance`: float
     - `result_type`: `"text"` or `"image"`
     - `file_created_at`: string
     - `file_last_updated_at`: string

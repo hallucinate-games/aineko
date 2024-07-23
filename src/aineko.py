@@ -196,6 +196,7 @@ class QueryResult(AbstractDataClass):
 
 @dataclass
 class TextResult(QueryResult):
+    distance: float
     result_type: Literal[QueryResultType.TEXT]
     text: str
     begin_chunk_idx: int
@@ -210,10 +211,13 @@ class SeenChunk:
     file_path: str
     chunk_idx: int
 
+import json
+
 def _collate_raw_results(raw_query_results, max_results: int, max_allowed_gap: int = 1) -> List[QueryResult]:
+    print(json.dumps(raw_query_results, indent=4))
     query_results: List[QueryResult] = []
     seen_chunks: Set[SeenChunk] = set()
-    for document, metadata in zip(raw_query_results['documents'][0], raw_query_results['metadatas'][0]):
+    for document, metadata, distance in zip(raw_query_results['documents'][0], raw_query_results['metadatas'][0], raw_query_results['distances'][0]):
         chunk_idx = metadata['chunk_index']
         file_path = metadata['file_path']
         seen_chunk = SeenChunk(file_path, chunk_idx)
@@ -264,6 +268,7 @@ def _collate_raw_results(raw_query_results, max_results: int, max_allowed_gap: i
         else:
             # No matching chunks to collate to. Add directly to query results.
             query_results.append(TextResult(
+                distance=distance,
                 result_type=QueryResultType.TEXT,
                 text=document,
                 begin_chunk_idx=chunk_idx,
