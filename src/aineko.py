@@ -211,10 +211,8 @@ class SeenChunk:
     file_path: str
     chunk_idx: int
 
-import json
 
 def _collate_raw_results(raw_query_results, max_results: int, max_allowed_gap: int = 1) -> List[QueryResult]:
-    print(json.dumps(raw_query_results, indent=4))
     query_results: List[QueryResult] = []
     seen_chunks: Set[SeenChunk] = set()
     for document, metadata, distance in zip(raw_query_results['documents'][0], raw_query_results['metadatas'][0], raw_query_results['distances'][0]):
